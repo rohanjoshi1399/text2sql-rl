@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Environment
+.env
+
+# Data & models (too large for git)
+data/spider/
+checkpoints/
+*.ckpt
+*.pt
+*.bin
+*.safetensors
+
+# Results (regenerable)
+results/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Experiment tracking
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

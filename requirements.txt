@@ -1,0 +1,13 @@
+torch>=2.8.0
+transformers
+datasets
+peft
+trl>=0.23.1
+vllm>=0.10.2
+accelerate
+bitsandbytes
+flash-attn>=2.6.3
+dspy
+sqlparse
+wandb
+nltk
