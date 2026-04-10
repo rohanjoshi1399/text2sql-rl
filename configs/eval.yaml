@@ -1,0 +1,20 @@
+# Evaluation Configuration
+model_name: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+data_dir: "data/spider_data/spider_data"
+output_dir: "results"
+
+eval:
+  split: "dev"                   # "dev" or "test" (test only for final numbers)
+  mode: "zero-shot"              # "zero-shot", "few-shot", "model"
+  few_shot_k: 5
+  batch_size: 8
+  max_new_tokens: 512
+  temperature: 0.0               # greedy decoding for eval
+  top_p: 1.0
+
+# Override via CLI for checkpoint evaluation
+checkpoint_path: null
+
+# Metrics
+compute_by_difficulty: true
+save_predictions: true

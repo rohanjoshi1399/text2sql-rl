@@ -1,0 +1,56 @@
+# GRPO Configuration — Group Relative Policy Optimization
+# Requires warm start from SFT checkpoint (non-negotiable)
+
+model_name: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+sft_checkpoint: "checkpoints/sft/best"
+data_dir: "data/spider_data/spider_data"
+output_dir: "checkpoints/grpo"
+
+# LoRA Configuration
+lora:
+  r: 32
+  lora_alpha: 32
+  lora_dropout: 0.0
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+# GRPO-specific Configuration
+grpo:
+  beta: 0.001                  # KL penalty — 0.1 would over-constrain policy
+  num_generations: 6           # G=4–8; 6 balances diversity vs VRAM
+  max_completion_length: 512   # SQL queries are short
+  temperature: 0.8             # prevents entropy collapse
+  reward_phase: 2              # 1=simple, 2=composite
+
+# Training Configuration
+training:
+  num_train_epochs: 2
+  per_device_train_batch_size: 1   # small due to num_generations=6
+  gradient_accumulation_steps: 8
+  learning_rate: 5.0e-6
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.1
+  max_grad_norm: 0.1               # aggressive clipping for stability
+  optim: "paged_adamw_8bit"
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 100
+  save_total_limit: 20
+  report_to: "wandb"
+  run_name: "grpo-llama31-8b-spider"
+
+# vLLM — start disabled, LoRA+vLLM has compatibility issues
+use_vllm: false
+vllm_mode: "colocate"
+
+# Data
+use_filtered: true
+filtered_data_path: "data/spider_train_filtered"

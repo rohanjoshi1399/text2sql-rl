@@ -1,0 +1,46 @@
+# SFT Configuration — Supervised Fine-Tuning warm-up for GRPO
+# Must reach >=70% EX on Spider dev before proceeding to GRPO
+
+model_name: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+data_dir: "data/spider_data/spider_data"
+output_dir: "checkpoints/sft"
+
+# LoRA Configuration
+lora:
+  r: 32
+  lora_alpha: 32
+  lora_dropout: 0.0
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+  task_type: "CAUSAL_LM"
+
+# Training Configuration
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8   # effective batch = 16
+  learning_rate: 2.0e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.05
+  weight_decay: 0.01
+  max_seq_length: 1024             # schema + question + SQL
+  optim: "paged_adamw_8bit"
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  eval_steps: 200
+  save_steps: 200
+  save_total_limit: 10
+  report_to: "none"
+  run_name: "sft-llama31-8b-spider"
+
+# Data
+use_filtered: true
+filtered_data_path: "data/spider_train_filtered"
+eval_split: "dev"
