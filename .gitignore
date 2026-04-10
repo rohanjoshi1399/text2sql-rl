@@ -11,7 +11,9 @@ venv/
 .env
 
 # Data & models (too large for git)
-data/spider/
+data/spider_data/
+data/scholar_mysql_dump.db/
+data/sqlizer/
 checkpoints/
 *.ckpt
 *.pt
@@ -20,6 +22,12 @@ checkpoints/
 
 # Results (regenerable)
 results/
+
+# Slurm logs
+logs/
+
+# Filtered dataset cache
+data/spider_train_filtered/
 
 # Notebooks
 .ipynb_checkpoints/
@@ -34,3 +42,16 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Claude Code
+.claude/
+
+# Presentations and course submissions
+presentations/
+
+# Generated figures and slides (regenerable)
+figures/
+scripts/generate_slides.py
+
+# Large archives
+*.tar.gz
