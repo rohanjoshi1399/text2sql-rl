@@ -40,7 +40,13 @@ def setup_slurm_signal_handler(trainer, output_dir: str):
         save_dir = os.path.join(output_dir, f"checkpoint-{step}")
         print(f"\n[SLURM] Received {sig_name} — saving checkpoint-{step} before exit...")
         trainer.save_model(save_dir)
+        # save_state() writes to trainer.args.output_dir by default —
+        # temporarily swap it so trainer_state.json lands inside the checkpoint dir
+        # where resume_from_checkpoint expects to find it.
+        original_output_dir = trainer.args.output_dir
+        trainer.args.output_dir = save_dir
         trainer.save_state()
+        trainer.args.output_dir = original_output_dir
         print(f"[SLURM] Checkpoint saved to {save_dir}. Exiting gracefully.")
         sys.exit(0)
 

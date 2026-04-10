@@ -52,6 +52,11 @@ def train(config_path: str, warm_start: str | None = None):
             "GRPO requires warm start from SFT checkpoint. "
             "Pass --warm-start or set sft_checkpoint in config."
         )
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(
+            f"SFT checkpoint not found at {model_path}. "
+            "Run SFT training first (sbatch jobs/run_sft.sh)."
+        )
     print(f"Loading from SFT checkpoint: {model_path}")
 
     # Build reward functions
@@ -75,8 +80,10 @@ def train(config_path: str, warm_start: str | None = None):
 
     # GRPO training config
     train_cfg = config["training"]
+    model_init_kwargs = {"torch_dtype": torch.bfloat16}
     training_args = GRPOConfig(
         output_dir=config["output_dir"],
+        model_init_kwargs=model_init_kwargs,
         # GRPO-specific (v0.14.0 supported params only)
         num_generations=grpo_cfg["num_generations"],
         beta=grpo_cfg["beta"],
