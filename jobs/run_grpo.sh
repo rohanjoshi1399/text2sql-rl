@@ -3,10 +3,10 @@
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:a100:1
-#SBATCH --mem=64GB
-#SBATCH --time=08:00:00
+#SBATCH --mem=32GB
+#SBATCH --time=04:00:00
 #SBATCH --signal=USR1@120
 #SBATCH --output=logs/grpo_%j.out
 #SBATCH --error=logs/grpo_%j.err
@@ -25,7 +25,8 @@ export HF_HOME=/scratch/$USER/hf_cache
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TOKENIZERS_PARALLELISM=false
 export HF_TOKEN=${HF_TOKEN:-""}
-export WANDB_PROJECT=sql-grpo
+export WANDB_MODE=disabled
+export PYTHONUNBUFFERED=1   # flush stdout immediately — training metrics appear in .out log in real time
 
 cd ~/text2sql-rl
 

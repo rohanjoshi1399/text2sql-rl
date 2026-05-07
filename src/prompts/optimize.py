@@ -106,11 +106,13 @@ class LocalTransformersLM(dspy.LM):
         )
         self._hf_model.eval()
 
-        # Build stop token IDs: EOS + Llama's <|eot_id|>
+        # Build stop token IDs: EOS + model-specific stop tokens
         self._stop_token_ids = [self._hf_tokenizer.eos_token_id]
-        eot_id = self._hf_tokenizer.convert_tokens_to_ids("<|eot_id|>")
-        if eot_id != self._hf_tokenizer.unk_token_id:
-            self._stop_token_ids.append(eot_id)
+        # Try common stop tokens: Llama, Gemma, etc.
+        for token_str in ["<|eot_id|>", "<end_of_turn>", "<|end_of_text|>"]:
+            token_id = self._hf_tokenizer.convert_tokens_to_ids(token_str)
+            if token_id != self._hf_tokenizer.unk_token_id:
+                self._stop_token_ids.append(token_id)
 
         print(f"  Model loaded. Stop tokens: {self._stop_token_ids}")
 

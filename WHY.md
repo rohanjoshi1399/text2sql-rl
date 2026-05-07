@@ -339,6 +339,137 @@ Every non-obvious choice made during the project, why it was made, and what alte
 - **Fix**: Changed `save_total_limit` to 10. With 1320 total steps and `save_steps: 200`, that's 7 checkpoints total -- all of them fit. Disk cost is ~200MB per checkpoint (LoRA adapters only), so 10 checkpoints = ~2GB. Negligible on `/scratch`.
 - **Rule**: When training spans multiple Slurm jobs and overfitting is possible, keep ALL checkpoints. Delete manually after evaluation, not automatically during training.
 
+### GRPO checkpoint resume: three-iteration failure log (2026-04)
+
+GRPO's `trainer.train(resume_from_checkpoint=…)` call failed three times in
+succession, each failure surfacing a different layer of the
+transformers 4.47.1 + PEFT + TRL 0.14.0 integration. Tracking each
+iteration here because the pattern of "fix one layer, next layer breaks"
+is instructive and relevant to anyone who runs GRPO with LoRA resume.
+
 ---
 
-*Last updated: 2026-04-08 (SFT at epoch 2.73, best checkpoint likely lost to save_total_limit)*
+#### Iteration 1 — `TypeError: module name should be a string`
+
+**Call site:** `_load_from_checkpoint` → `_model.load_adapter(adapter_name=active)`
+
+**Root cause:**
+`AutoModelForCausalLM.from_pretrained(peft_dir)` with transformers ≥ 4.35
+injects LoRA layers into the *base* `LlamaForCausalLM` in-place via
+`PeftAdapterMixin`, setting `_hf_peft_config_loaded = True`. The result is
+NOT a `PeftModel` wrapper — it is the base class with LoRA injected.
+
+In this path, `active_adapters` is a **bound method** on
+`PeftAdapterMixin`, not a list property as it is on PEFT's `PeftModel`.
+Our code did:
+```python
+if isinstance(_model.active_adapters, list):
+    active = _model.active_adapters[0]
+else:
+    active = _model.active_adapters   # <-- assigned the method object
+```
+That method object then became the `adapter_name` argument passed to
+`load_adapter`, which eventually reached `nn.ModuleDict.__setitem__` and
+crashed because a dict key must be a string.
+
+**Fix applied:** Detect callables explicitly:
+```python
+aa = getattr(_model, "active_adapters", None)
+if callable(aa):
+    aa = aa()
+active = aa[0] if isinstance(aa, (list, tuple)) else aa or "default"
+if not isinstance(active, str):
+    active = "default"
+```
+
+---
+
+#### Iteration 2 — `ValueError: Adapter with name default already exists`
+
+**Call site:** `_load_from_checkpoint` → `_model.load_adapter(…)`
+
+**Root cause:**
+`transformers.integrations.peft.PeftAdapterMixin.load_adapter` checks
+`if adapter_name in self.peft_config: raise ValueError(…)` before injecting.
+The adapter "default" was already present (loaded by `GRPOTrainer.__init__`
+from the SFT warm-start). Our deletion guard:
+```python
+if hasattr(_model, "delete_adapter"):
+    _model.delete_adapter(active)
+```
+evaluated to `False` — `delete_adapter` is a `PeftModel` method; it is NOT
+exposed on `PeftAdapterMixin`.
+
+**Fix applied:** Add a fallback that pops directly from `peft_config` dict:
+```python
+if hasattr(_model, "delete_adapter"):
+    _model.delete_adapter(active)
+else:
+    _model.peft_config.pop(active, None)  # clears the guard in load_adapter
+```
+Popping the config entry is safe because PEFT's subsequent
+`inject_adapter_in_model → update_layer` call overwrites the layer
+entries anyway, and `load_adapter` then writes the checkpoint weights on
+top.
+
+---
+
+#### Iteration 3 — `ValueError: loaded state dict contains a parameter group that doesn't match`
+
+**Call site (path A):** `_inner_training_loop` → `_load_optimizer_and_scheduler` →
+`self.optimizer.load_state_dict`
+
+**Call site (path B):** `_inner_training_loop` (line 2354, inline) →
+`accelerate.optimizer.load_state_dict` → `bitsandbytes.optimizer.load_state_dict`
+
+**Root cause:**
+PEFT's `update_layer` (called from `load_adapter → inject_adapter_in_model`)
+assigns fresh `nn.Linear` instances to `lora_A[adapter_name]` and
+`lora_B[adapter_name]`. New `nn.Linear` objects have new Python identity.
+The `GRPOTrainer` then calls `create_optimizer()` which builds
+`paged_adamw_8bit` from the current `model.parameters()` — the NEW
+parameter objects.
+
+The saved `optimizer.pt` from `checkpoint-100` was serialized against
+the ORIGINAL parameters that existed at the time of saving. Bitsandbytes'
+`load_state_dict` compares `len(saved_group['params'])` against
+`len(current_group['params'])`. If PEFT re-injection produced any
+structural change (e.g., extra adapters registered in a ModuleDict),
+the count mismatch triggers the ValueError.
+
+**Attempt: `_load_optimizer_and_scheduler` override (path A only)**
+
+Added a `try/except ValueError` wrapper around `super()._load_optimizer_and_scheduler`.
+This caught path A but NOT path B — transformers 4.47.1's
+`_inner_training_loop` has a second inline call that goes through the
+accelerate optimizer wrapper, bypassing our method override entirely.
+
+**Definitive fix: `_purge_optimizer_state()` in `train()` (kills both paths)**
+
+Before `trainer.train(resume_from_checkpoint=resume_ckpt)` is called,
+rename `optimizer.pt`, `scheduler.pt`, and `scaler.pt` to `.bak` files:
+```python
+def _purge_optimizer_state(checkpoint_dir):
+    for fname in ("optimizer.pt", "scheduler.pt", "scaler.pt"):
+        src = os.path.join(checkpoint_dir, fname)
+        if os.path.exists(src):
+            os.rename(src, src + ".bak")
+```
+Both code paths guard on `os.path.isfile(optimizer.pt)` before loading.
+Removing the file means both guards fail silently — no exception is ever
+raised. Model weights, `global_step`, RNG state, and LR scheduler progress
+are still restored from the checkpoint directory; only Adam moment
+estimates are lost, which re-stabilize in ~20-50 steps.
+
+**Why not just upgrade transformers/PEFT/TRL?**
+Upgrading any one of the three packages can break the others. TRL 0.14.0
+is pinned because it was the version that passed the smoke test (see
+section 9). The integration failure described here is a known class of
+bug in the transformers+PEFT mixin path for models loaded via
+`AutoModelForCausalLM.from_pretrained(peft_dir)`. The fix above is
+version-independent: it removes the problematic file before any code path
+can reach it.
+
+---
+
+*Last updated: 2026-04-20 (GRPO resume bug fully patched; ckpt-100 evals at 70.7%)*

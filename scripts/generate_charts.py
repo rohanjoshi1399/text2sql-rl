@@ -10,19 +10,39 @@ import numpy as np
 
 os.makedirs("figures", exist_ok=True)
 
-# Load data
-zs = json.load(open("results/eval_dev_zero-shot.json"))
-fs = json.load(open("results/eval_dev_few-shot.json"))
-sft = json.load(open("results/eval_dev_model.json"))
+# Load data. Prefer the *_official_hardness.json variants (produced by
+# scripts/reclassify_difficulty.py) so per-difficulty charts use Spider's
+# canonical hardness partition instead of our in-repo heuristic.
+def _load(name: str) -> dict:
+    official = f"results/eval_dev_{name}_official_hardness.json"
+    default = f"results/eval_dev_{name}.json"
+    path = official if os.path.exists(official) else default
+    d = json.load(open(path))
+    # Normalize per-difficulty field name so existing chart code keeps working.
+    if "by_difficulty_official" in d:
+        d["by_difficulty"] = d["by_difficulty_official"]
+    return d
+
+zs = _load("zero-shot")
+fs = _load("few-shot")
+sft = _load("model")
+grpo = _load("grpo_best") if os.path.exists(
+    "results/eval_dev_grpo_best_official_hardness.json"
+) or os.path.exists("results/eval_dev_grpo_best.json") else None
 
 # ============================================================
 # Chart 1: Overall Results Bar Chart
 # ============================================================
-conditions = ["Zero-shot", "5-shot", "DSPy\n(MIPROv2)", "SFT\n(1 epoch)"]
-scores = [67.8, 66.3, 58.6, 69.2]
-colors = ["#4A90D9", "#5BA0E0", "#E8A838", "#2ECC71"]
+conditions = ["Zero-shot", "5-shot", "DSPy\n(MIPROv2)", "SFT\n(ep 1)", "SFT\n(ep 3)"]
+scores = [67.8, 66.3, 58.6, 69.2, 71.1]
+colors = ["#4A90D9", "#5BA0E0", "#E8A838", "#58D68D", "#27AE60"]
 
-fig, ax = plt.subplots(figsize=(10, 6))
+if grpo is not None:
+    conditions.append("GRPO\n(final)")
+    scores.append(round(grpo["overall_ex"] * 100, 1))
+    colors.append("#D35400")
+
+fig, ax = plt.subplots(figsize=(12, 6))
 bars = ax.bar(conditions, scores, color=colors, width=0.6, edgecolor="white", linewidth=1.5)
 
 for bar, score in zip(bars, scores):
@@ -30,7 +50,8 @@ for bar, score in zip(bars, scores):
             f"{score:.1f}%", ha="center", va="bottom", fontweight="bold", fontsize=14)
 
 ax.axhline(y=29.2, color="red", linestyle="--", linewidth=1.5, alpha=0.7)
-ax.text(3.4, 30.5, "Update 1: Exact Match (29.2%)", color="red", fontsize=10, alpha=0.8)
+ax.text(len(conditions) - 0.6, 30.5, "Update 1: Exact Match (29.2%)",
+        color="red", fontsize=10, alpha=0.8, ha="right")
 
 ax.set_ylabel("Execution Accuracy (%)", fontsize=13)
 ax.set_title("Spider Dev Set - Execution Accuracy (n=1,034)", fontsize=15, fontweight="bold")
@@ -56,14 +77,27 @@ sft_scores = [sft["by_difficulty"].get("easy", 0) * 100, sft["by_difficulty"].ge
               sft["by_difficulty"].get("hard", 0) * 100, sft["by_difficulty"].get("extra", 0) * 100]
 
 x = np.arange(len(difficulties))
-width = 0.25
+
+# Include GRPO as a fourth series when its eval JSON is available.
+series = [("Zero-shot", zs_scores, "#4A90D9"),
+          ("5-shot", fs_scores, "#5BA0E0"),
+          ("SFT (3 epochs)", sft_scores, "#27AE60")]
+if grpo is not None:
+    grpo_scores = [grpo["by_difficulty"].get(k, 0) * 100
+                   for k in ("easy", "medium", "hard", "extra")]
+    series.append(("GRPO (final)", grpo_scores, "#D35400"))
+
+n = len(series)
+width = 0.8 / n   # fit all bars in unit-wide category slot with small margin
 
 fig, ax = plt.subplots(figsize=(12, 6))
-bars1 = ax.bar(x - width, zs_scores, width, label="Zero-shot", color="#4A90D9")
-bars2 = ax.bar(x, fs_scores, width, label="5-shot", color="#5BA0E0")
-bars3 = ax.bar(x + width, sft_scores, width, label="SFT (1 epoch)", color="#2ECC71")
-
-for bar_group in [bars1, bars2, bars3]:
+offsets = [(i - (n - 1) / 2.0) * width for i in range(n)]
+bars_by_series = []
+for (label, scores_arr, color), off in zip(series, offsets):
+    bars_by_series.append(
+        ax.bar(x + off, scores_arr, width, label=label, color=color)
+    )
+for bar_group in bars_by_series:
     for bar in bar_group:
         height = bar.get_height()
         if height > 0:
@@ -215,12 +249,20 @@ print("Saved: figures/reward_architecture.png")
 fig, ax = plt.subplots(figsize=(10, 5))
 
 categories_imp = ["Easy", "Medium", "Hard", "Extra Hard", "Overall"]
-zs_vals = [75.5, 64.3, 56.9, 16.7, 67.8]
-sft_vals = [77.7, 62.5, 64.1, 0.0, 69.2]
+# Values pulled from the same source as Chart 2 — official Spider hardness.
+_zs_pd = zs["by_difficulty"]
+_sft_pd = sft["by_difficulty"]
+_grpo_pd = grpo["by_difficulty"] if grpo is not None else None
+# Show GRPO delta over zero-shot if available, else SFT delta
+_ref_pd = _grpo_pd if _grpo_pd is not None else _sft_pd
+_ref_overall = grpo["overall_ex"] * 100 if grpo is not None else sft["overall_ex"] * 100
+_ref_label = "GRPO (final)" if grpo is not None else "SFT (3 epochs)"
+zs_vals = [_zs_pd["easy"] * 100, _zs_pd["medium"] * 100, _zs_pd["hard"] * 100, _zs_pd["extra"] * 100, zs["overall_ex"] * 100]
+sft_vals = [_ref_pd["easy"] * 100, _ref_pd["medium"] * 100, _ref_pd["hard"] * 100, _ref_pd["extra"] * 100, _ref_overall]
 improvements = [sft_vals[i] - zs_vals[i] for i in range(len(zs_vals))]
 
 x = np.arange(len(categories_imp))
-bar_colors_imp = ["#2ECC71" if v >= 0 else "#E74C3C" for v in improvements]
+bar_colors_imp = ["#27AE60" if v > 0 else ("#95A5A6" if v == 0 else "#E74C3C") for v in improvements]
 bars = ax.bar(x, improvements, color=bar_colors_imp, width=0.5, edgecolor="white")
 
 for bar, val in zip(bars, improvements):
@@ -231,7 +273,7 @@ for bar, val in zip(bars, improvements):
 ax.set_xticks(x)
 ax.set_xticklabels(categories_imp, fontsize=12)
 ax.set_ylabel("EX Change (%)", fontsize=13)
-ax.set_title("SFT (1 epoch) Improvement Over Zero-shot", fontsize=15, fontweight="bold")
+ax.set_title(f"{_ref_label} Improvement Over Zero-shot", fontsize=15, fontweight="bold")
 ax.axhline(y=0, color="black", linewidth=0.5)
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
@@ -241,4 +283,35 @@ plt.savefig("figures/sft_improvement.png", dpi=200, bbox_inches="tight")
 plt.close()
 print("Saved: figures/sft_improvement.png")
 
-print("\nAll 7 charts generated in figures/")
+# ============================================================
+# Chart 8: SFT delta by difficulty — where SFT wins and loses
+# ============================================================
+# Uses the official Spider hardness partition. The story under the canonical
+# partition: SFT gains on medium and extra-hard, regresses on hard.
+diffs_8 = ["Easy", "Medium", "Hard", "Extra Hard"]
+zs_vals_8 = [zs["by_difficulty"].get(k, 0) * 100 for k in ["easy", "medium", "hard", "extra"]]
+sft_vals_8 = [sft["by_difficulty"].get(k, 0) * 100 for k in ["easy", "medium", "hard", "extra"]]
+deltas_8 = [sft_vals_8[i] - zs_vals_8[i] for i in range(4)]
+
+fig, ax = plt.subplots(figsize=(10, 5))
+bar_colors_8 = ["#27AE60" if d > 0 else ("#95A5A6" if d == 0 else "#E74C3C") for d in deltas_8]
+bars = ax.bar(diffs_8, deltas_8, color=bar_colors_8, width=0.5, edgecolor="white")
+for bar, d, zs_v, sft_v in zip(bars, deltas_8, zs_vals_8, sft_vals_8):
+    y_pos = bar.get_height() + 0.3 if d >= 0 else bar.get_height() - 1.5
+    ax.text(bar.get_x() + bar.get_width() / 2.0, y_pos,
+            f"{d:+.1f}%\n({zs_v:.1f}→{sft_v:.1f})",
+            ha="center", va="bottom" if d >= 0 else "top", fontsize=10, fontweight="bold")
+
+ax.axhline(y=0, color="black", linewidth=0.5)
+ax.set_ylabel("EX Change: SFT (ep 3) − Zero-shot (pp)", fontsize=12)
+ax.set_title("Where SFT Wins and Loses (official Spider hardness)",
+             fontsize=14, fontweight="bold")
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.grid(axis="y", alpha=0.3)
+plt.tight_layout()
+plt.savefig("figures/sft_delta_by_difficulty.png", dpi=200, bbox_inches="tight")
+plt.close()
+print("Saved: figures/sft_delta_by_difficulty.png")
+
+print("\nAll 8 charts generated in figures/")

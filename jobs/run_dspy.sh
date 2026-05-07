@@ -4,14 +4,16 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:v100-sxm2:1
-#SBATCH --mem=32GB
-#SBATCH --time=04:00:00
+#SBATCH --gres=gpu:a100:1
+#SBATCH --mem=80GB
+#SBATCH --time=06:00:00
+#SBATCH --signal=USR1@120
 #SBATCH --output=logs/dspy_%j.out
 #SBATCH --error=logs/dspy_%j.err
 
 # DSPy MIPROv2 prompt optimization
-# Launches a vLLM server for local Llama 8B inference
+# Task model: Llama 3.1 8B (SQL generation)
+# Optimizer model: Gemma 4 31B (proposes better prompts)
 # Usage: sbatch jobs/run_dspy.sh
 
 set -euo pipefail
@@ -31,12 +33,11 @@ cd ~/text2sql-rl
 echo "=== DSPy MIPROv2 Optimization ==="
 echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
 
-# Uses local transformers for inference — no vLLM needed
 python -m src.prompts.optimize \
     --task-model meta-llama/Meta-Llama-3.1-8B-Instruct \
-    --opt-model meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --opt-model google/gemma-4-31b-it \
     --optimizer miprov2 \
     --trainset-size 200 \
-    --output checkpoints/dspy_optimized
+    --output checkpoints/dspy_llama_gemma4
 
 echo "=== Done ==="

@@ -110,6 +110,7 @@ def evaluate(
     few_shot_k: int = 5,
     output_dir: str = "results",
     raw_data: list[dict] | None = None,
+    name: str | None = None,
 ) -> dict:
     """
     Run evaluation on a Spider split.
@@ -258,9 +259,11 @@ def evaluate(
         "predictions": predictions,
     }
 
-    # Save
+    # Save. `name` overrides the mode-derived filename so we can evaluate
+    # multiple `--mode model` checkpoints without clobbering each other's JSON.
     os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, f"eval_{split}_{mode}.json")
+    label = name or mode
+    output_file = os.path.join(output_dir, f"eval_{split}_{label}.json")
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nResults: EX={overall_ex:.4f} ({correct}/{len(dataset)})")
@@ -280,6 +283,12 @@ def main():
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("-k", type=int, default=5, help="Number of few-shot examples")
     parser.add_argument("--output", default="results")
+    parser.add_argument(
+        "--name",
+        default=None,
+        help="Override the label used in the output filename "
+             "(eval_<split>_<name>.json). Defaults to the --mode value.",
+    )
     parser.add_argument("--config", default=None, help="Load settings from eval config YAML")
     args = parser.parse_args()
 
@@ -312,6 +321,7 @@ def main():
         few_shot_k=args.k,
         output_dir=args.output,
         raw_data=raw_data,
+        name=args.name,
     )
 
 
